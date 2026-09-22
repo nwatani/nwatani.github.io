@@ -291,15 +291,23 @@ div.fixed.bottom-4 {
 })();
 </script>
 <script>
-/* ── project-card links · v1 ───────────────────────────────────────────
-   Each repo card keeps its own link, and gains a hover bar offering the two
-   destinations explicitly: the GitHub repository and the live demo.
-   Why buttons and not anchors: the whole card is already an <a>, and nested
-   anchors are invalid HTML. Both buttons call preventDefault() so a click on
-   the bar does not also fire the card's own link.
-   The demo URL comes from api.github.com's `homepage` field, falling back to
-   https://<user>.github.io/<repo>/ when `has_pages` is true; cards with no
-   published demo simply get no bar. Re-runs on re-render and language change. */
+/* ── project-card links · v2 ───────────────────────────────────────────
+   Every repo card gains a small, always-visible row of two choices:
+   "Repository" and "Live demo" — so the visitor picks instead of being forced
+   into whichever URL the card happens to carry.
+   Why v2: a hover-only bar was invisible to anyone who did not hover exactly
+   over the card, and it depended on api.github.com — so a rate-limited API
+   meant no bar at all. Also, the user-site repo card (nwatani.github.io) used
+   to be skipped; it now gets both buttons like every other card, its demo
+   pointing at the site root. Now:
+     · the row is always rendered (subtle, at the foot of the card);
+     · the Repository URL is derived from the card's own link, so that button
+       appears with zero API calls;
+     · the Live demo button is added as soon as we know a demo is published
+       (api.github.com `homepage`, or `has_pages`, or the card already pointing
+       at github.io/<repo>/), so it is never a dead link;
+     · buttons, not anchors: the card is already an <a> and nested anchors are
+       invalid. Each calls preventDefault() so the card's link does not fire. */
 (function () {
   var CACHE = "nwatani.repomap", TTL = 30 * 60 * 1000, NEW_TAB = true;
   var map = null, loading = false;
@@ -323,24 +331,20 @@ div.fixed.bottom-4 {
     var s = document.createElement("style");
     s.id = "repolinks-css";
     s.textContent =
-      ".has-repolinks{position:relative}" +
-      ".repolinks{position:absolute;inset:auto 0 0 0;z-index:6;display:flex;gap:8px;flex-wrap:wrap;" +
-      "padding:28px 12px 12px;border-radius:0 0 1rem 1rem;pointer-events:none;opacity:0;" +
-      "transform:translateY(6px);transition:opacity .18s ease,transform .18s ease;" +
-      "background:linear-gradient(to top,rgba(3,10,22,.94),rgba(3,10,22,.74) 55%,transparent)}" +
-      ".has-repolinks:hover>.repolinks,.has-repolinks:focus-within>.repolinks{opacity:1;transform:none;pointer-events:auto}" +
-      ".repolinks button{cursor:pointer;font:inherit;font-size:11px;font-weight:700;padding:6px 10px;" +
-      "border-radius:9px;white-space:nowrap;" +
-      "border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#cfe0f2}" +
-      ".repolinks button:hover{background:rgba(255,255,255,.13)}" +
+      /* always present, pinned to the foot of the card — never hover-only */
+      ".repolinks{display:flex;gap:8px;flex-wrap:wrap;align-items:center;" +
+      "margin-top:auto;padding-top:12px;border-top:1px solid rgba(255,255,255,.08)}" +
+      ".repolinks button{cursor:pointer;font-family:inherit;font-size:11.5px;font-weight:700;" +
+      "padding:7px 11px;border-radius:9px;white-space:nowrap;line-height:1.2;" +
+      "border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.06);color:#cfe0f2;" +
+      "transition:background-color .15s ease,border-color .15s ease,color .15s ease}" +
+      ".repolinks button:hover{border-color:rgba(255,255,255,.34);background:rgba(255,255,255,.13)}" +
       ".repolinks button.demo{border-color:color-mix(in srgb,var(--color-accent) 45%,transparent);" +
-      "background:color-mix(in srgb,var(--color-accent) 12%,rgba(3,10,22,.9));" +
-      "color:color-mix(in srgb,var(--color-accent) 90%,white)}" +
-      ".repolinks button.demo:hover{background:color-mix(in srgb,var(--color-accent) 24%,rgba(3,10,22,.9))}" +
-      ".repolinks button:focus-visible{outline:2px solid color-mix(in srgb,var(--color-accent) 70%,transparent);outline-offset:2px}" +
-      "@media (hover:none){.repolinks{position:static;opacity:1;transform:none;pointer-events:auto;" +
-      "padding:12px 0 0;background:none;border-radius:0}}" +
-      "@media (prefers-reduced-motion:reduce){.repolinks{transition:none}}";
+      "background:color-mix(in srgb,var(--color-accent) 13%,rgba(3,10,22,.9));" +
+      "color:color-mix(in srgb,var(--color-accent) 92%,white)}" +
+      ".repolinks button.demo:hover{background:color-mix(in srgb,var(--color-accent) 26%,rgba(3,10,22,.9))}" +
+      ".repolinks button:focus-visible,.repolinks button:active{outline:2px solid color-mix(in srgb,var(--color-accent) 70%,transparent);outline-offset:2px}" +
+      "@media (prefers-reduced-motion:reduce){.repolinks button{transition:none}}";
     (document.head || document.documentElement).appendChild(s);
   }
 
@@ -364,7 +368,10 @@ div.fixed.bottom-4 {
         map = m;
         try { sessionStorage.setItem(CACHE, JSON.stringify({ at: Date.now(), data: m })); } catch (e) {}
       })
-      .catch(function () { map = {}; })
+      .catch(function () {
+        map = {};                                  /* repo buttons only, for now */
+        setTimeout(function () { map = null; loadMap(paint); }, 20000);   /* one retry */
+      })
       .then(function () { loading = false; then(); });
   }
 
@@ -374,14 +381,25 @@ div.fixed.bottom-4 {
     var asPages = href.match(new RegExp("^https://" + u + "\\.github\\.io/([^/?#]+)/?$", "i"));
     var asRoot  = new RegExp("^https://" + u + "\\.github\\.io/?$", "i").test(href);
     var name = asRoot ? u + ".github.io" : asRepo ? asRepo[1] : asPages ? asPages[1] : "";
-    if (!name || name === u + ".github.io") return null;      /* skip this page's own repo */
+    if (!name) return null;
 
     var meta = map && map[name];
     var demo = "";
-    if (meta && meta.homepage) demo = meta.homepage;
-    else if (meta && meta.pages) demo = "https://" + u + ".github.io/" + name + "/";
-    else if (asPages) demo = href;                            /* the card already links a demo */
-    if (!demo) return null;
+
+    if (name === u + ".github.io") {
+      /* the user site: its demo is this very site, its repo is the profile repo.
+         v2 gives it both buttons like every other card, instead of skipping it. */
+      demo = "https://" + u + ".github.io/";
+    } else if (meta && meta.homepage) {
+      demo = meta.homepage;
+    } else if (meta && meta.pages) {
+      demo = "https://" + u + ".github.io/" + name + "/";
+    } else if (asPages) {
+      demo = href;                                            /* the card already links a demo */
+    }
+    /* the repository link is always derivable from the card itself, so a card is
+       never skipped: if the API is rate-limited the visitor still gets the repo
+       button, and the demo button is added once the data arrives. */
     return { name: name, repo: "https://github.com/" + u + "/" + name, demo: demo };
   }
 
@@ -390,7 +408,7 @@ div.fixed.bottom-4 {
     if (NEW_TAB) window.open(url, "_blank", "noopener"); else location.href = url;
   }
 
-  var timer;
+  var timer, lastCount = -1;
   function schedule() { clearTimeout(timer); timer = setTimeout(paint, 80); }
 
   function paint() {
@@ -401,33 +419,52 @@ div.fixed.bottom-4 {
     });
 
     html.forEach(function (a) {
-      var sig = isAr() + "|" + (map ? 1 : 0) + "|" + (a.querySelector(".repolinks") ? 1 : 0);
-      if (a.dataset.repolinks === sig) return;
       var info = infoFor(a);
       if (!info) return;
+      /* signature includes the language *and* whether a demo is known, so the
+         bar is rebuilt once the repo data lands */
+      var sig = isAr() + "|" + (info.demo ? 1 : 0) + "|" + (a.querySelector(".repolinks") ? 1 : 0);
+      if (a.dataset.repolinks === sig) return;
 
       var prev = a.querySelector(".repolinks");
       if (prev && prev.parentNode) prev.parentNode.removeChild(prev);
 
       var bar = document.createElement("div");
       bar.className = "repolinks";
+
       var bRepo = document.createElement("button");
       bRepo.type = "button"; bRepo.className = "repo"; bRepo.dir = "auto";
       bRepo.textContent = t.repo;
       bRepo.setAttribute("aria-label", t.repo + " — " + info.name);
       bRepo.addEventListener("click", function (e) { openUrl(info.repo, e); });
-      var bDemo = document.createElement("button");
-      bDemo.type = "button"; bDemo.className = "demo"; bDemo.dir = "auto";
-      bDemo.textContent = t.demo;
-      bDemo.setAttribute("aria-label", t.demo + " — " + info.name);
-      bDemo.addEventListener("click", function (e) { openUrl(info.demo, e); });
-      bar.appendChild(bRepo); bar.appendChild(bDemo);
+      bar.appendChild(bRepo);
+
+      if (info.demo) {                    /* only when we know it is published */
+        var bDemo = document.createElement("button");
+        bDemo.type = "button"; bDemo.className = "demo"; bDemo.dir = "auto";
+        bDemo.textContent = t.demo;
+        bDemo.setAttribute("aria-label", t.demo + " — " + info.name);
+        bDemo.addEventListener("click", function (e) { openUrl(info.demo, e); });
+        bar.appendChild(bDemo);
+      }
 
       a.appendChild(bar);
       a.classList.add("has-repolinks");
       a.dataset.repolinks = sig;         /* set after insertion: this node's own
                                             mutation must not re-trigger paint   */
     });
+
+    /* a one-line console report, so the state is visible without guessing */
+    try {
+      var n = document.querySelectorAll(".repolinks").length;
+      var demoCount = document.querySelectorAll(".repolinks button.demo").length;
+      if (n !== lastCount) {
+        lastCount = n;
+        window.__cardlinks = { cards: n, withDemo: demoCount, repoListLoaded: !!map };
+        console.info("[cardlinks] " + n + " card(s), " + demoCount + " with a live-demo button" +
+          (map ? "" : " — repo list not loaded yet"));
+      }
+    } catch (e) {}
   }
 
   function boot() {
